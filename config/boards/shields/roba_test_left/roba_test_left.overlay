@@ -1,0 +1,4 @@
+/ { chosen { zmk,keyboard = &kscan0; }; };
+&zmk_keymap { compatible = "zmk,keymap"; default_layer { bindings = <&kp A>; }; };
+kscan0: kscan { compatible = "zmk,kscan-gpio-matrix"; diode-direction = "col2row";
+row-gpios = <&gpio0 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; col-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>; };
