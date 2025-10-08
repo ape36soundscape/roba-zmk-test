@@ -1,0 +1,35 @@
+name: Build ZMK Firmware
+on: { workflow_dispatch: {} }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y python3-pip cmake ninja-build gperf dfu-util ccache             device-tree-compiler wget curl git gcc g++ make libssl-dev             libusb-1.0-0-dev libglib2.0-0 libglib2.0-dev
+          python3 -m pip install --upgrade pip
+          pip install west pyninja pykwalify
+      - name: Initialize west workspace
+        run: |
+          west init -l config
+          west update
+          west zephyr-export
+      - name: Resolve ZMK and Zephyr paths
+        run: |
+          echo "ZMK_APP=$(west list -f '{path}' zmk)/app" >> $GITHUB_ENV
+          echo "ZEPHYR_BASE=$(west list -f '{path}' zephyr)" >> $GITHUB_ENV
+      - name: Build Left Firmware
+        run: |
+          west build -p always -b seeed_xiao_ble -d build/left $ZMK_APP -- -DSHIELD=roba_test_left -DZMK_CONFIG=${{ github.workspace }}/config
+      - name: Build Right Firmware
+        run: |
+          west build -p always -b seeed_xiao_ble -d build/right $ZMK_APP -- -DSHIELD=roba_test_right -DZMK_CONFIG=${{ github.workspace }}/config
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZMK-UF2
+          path: |
+            build/left/zephyr/zmk.uf2
+            build/right/zephyr/zmk.uf2
