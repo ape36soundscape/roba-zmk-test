@@ -1,0 +1,2 @@
+config SHIELD_ROBA_TEST_RIGHT
+    bool "roBa test right shield"
