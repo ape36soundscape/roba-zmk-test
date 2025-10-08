@@ -1,0 +1,5 @@
+file_format: "1"
+id: roba_test_right
+name: roBa Test Right
+type: shield
+compatible: seeeduino_xiao_ble
