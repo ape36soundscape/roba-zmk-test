@@ -2,55 +2,53 @@ name: Build ZMK Firmware
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # --- リポジトリを取得 ---
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- 必要パッケージをインストール ---
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            git cmake ninja-build gperf ccache dfu-util \
-            device-tree-compiler wget python3-dev python3-pip python3-setuptools python3-wheel xz-utils file make gcc g++ curl
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      # --- Python環境をセットアップ ---
-      - name: Set up Python environment
+      - name: Install west and dependencies
         run: |
-          python3 -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install west
+          west --version
 
-      # --- westを初期化 ---
-      - name: Initialize west workspace
+      - name: Initialize ZMK workspace
         run: |
-          west init -l config
+          west init -l app
           west update
           west zephyr-export
           pip install -r zephyr/scripts/requirements.txt
 
-      # --- 左側ファームウェアをビルド ---
       - name: Build Left Firmware
         run: |
-          west build -p always -b seeeduino_xiao_ble -d build/left zmk/app \
-            -- -DSHIELD=roba_test_left -DZMK_CONFIG=$(pwd)/config
+          west build -p always -b seeeduino_xiao_ble -d build/left config/app \
+            -- -DSHIELD=roba_test_left -DZMK_CONFIG=${{ github.workspace }}/config
 
-      # --- 右側ファームウェアをビルド ---
       - name: Build Right Firmware
         run: |
-          west build -p always -b seeeduino_xiao_ble -d build/right zmk/app \
-            -- -DSHIELD=roba_test_right -DZMK_CONFIG=$(pwd)/config
+          west build -p always -b seeeduino_xiao_ble -d build/right config/app \
+            -- -DSHIELD=roba_test_right -DZMK_CONFIG=${{ github.workspace }}/config
 
-      # --- UF2成果物をアップロード ---
       - name: Upload UF2 Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ZMK-Firmware-UF2
+          name: ZMK Firmware
           path: |
             build/left/zephyr/zmk.uf2
             build/right/zephyr/zmk.uf2
