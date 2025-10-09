@@ -30,7 +30,7 @@ jobs:
 
       - name: Initialize ZMK workspace
         run: |
-          west init -l app
+          west init -l .
           west update
           west zephyr-export
           pip install -r zephyr/scripts/requirements.txt
