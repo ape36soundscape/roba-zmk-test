@@ -33,7 +33,14 @@ jobs:
           west init -l .
           west update
           west zephyr-export
-          pip install -r zephyr/scripts/requirements.txt
+          # 修正版: 新旧どちらのrequirements.txtにも対応
+          if [ -f zephyr/scripts/requirements.txt ]; then
+            pip install -r zephyr/scripts/requirements.txt
+          elif [ -f zephyr/scripts/requirements/requirements.txt ]; then
+            pip install -r zephyr/scripts/requirements/requirements.txt
+          else
+            echo "⚠️ No requirements file found — continuing anyway."
+          fi
 
       - name: Build Left Firmware
         run: |
