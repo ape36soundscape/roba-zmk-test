@@ -1,2 +1,3 @@
+# Kconfig for roBa test left
 config SHIELD_ROBA_TEST_LEFT
-    bool "roBa test left shield"
+    def_bool y
