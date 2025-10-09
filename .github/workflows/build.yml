@@ -11,20 +11,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # リポジトリをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Python 環境をセットアップ
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      # west と依存関係をインストール
       - name: Install west and dependencies
         run: |
           pip install --upgrade pip
           pip install west
           west --version
 
+      # ZMK ワークスペース初期化
       - name: Initialize ZMK workspace
         run: |
           west init -l .
@@ -38,27 +42,37 @@ jobs:
             echo "⚠️ No requirements file found — continuing anyway."
           fi
 
-      # 🧩 ZMK ソースを確実にクローン（appフォルダを保証）
+      # ZMK ソースを保証（app フォルダの存在を確保）
       - name: Fix ZMK workspace path
         run: |
           mkdir -p zmk
           if [ ! -d "zmk/app" ]; then
-            echo "📦 Cloning ZMK main source..."
+            echo "📦 Cloning ZMK source..."
             git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
           else
-            echo "✅ ZMK source already exists"
+            echo "✅ ZMK source already exists."
           fi
 
+      # Shield パスを明示的にリンク
+      - name: Fix shield path
+        run: |
+          mkdir -p boards/shields
+          cp -r config/boards/shields/roba_test_left boards/shields/ || true
+          cp -r config/boards/shields/roba_test_right boards/shields/ || true
+
+      # 左側ファームウェアのビルド
       - name: Build Left Firmware
         run: |
           west build -p always -b seeeduino_xiao_ble -d build/left zmk/app \
-            -- -DSHIELD=roba_test_left -DZMK_CONFIG=${{ github.workspace }}/config
+            -- -DSHIELD=roba_test_left -DZMK_CONFIG=${{ github.workspace }}/config/boards
 
+      # 右側ファームウェアのビルド
       - name: Build Right Firmware
         run: |
           west build -p always -b seeeduino_xiao_ble -d build/right zmk/app \
-            -- -DSHIELD=roba_test_right -DZMK_CONFIG=${{ github.workspace }}/config
+            -- -DSHIELD=roba_test_right -DZMK_CONFIG=${{ github.workspace }}/config/boards
 
+      # 出力されたUF2ファイルをアップロード
       - name: Upload UF2 Artifacts
         uses: actions/upload-artifact@v4
         with:
