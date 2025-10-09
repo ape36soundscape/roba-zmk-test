@@ -1,83 +1,117 @@
-name: Build ZMK Firmware (safe)
+name: Build ZMK Firmware (robust)
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
-# GHCR のコンテナを引っ張る権限（denied を防止）
-permissions:
-  contents: read
-  packages: read
+env:
+  BOARD: seeeduino_xiao_ble
+  SHIELD_LEFT:  roba_test_left
+  SHIELD_RIGHT: roba_test_right
+  ZMK_CFG_DIR: ${{ github.workspace }}/config
+  APP_DIR: zmk/app
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    # ZMK 公式ビルド環境（Zephyr/SDK 同梱）
-    container:
-      image: ghcr.io/zmkfirmware/zmk-build:stable
-
-    env:
-      BOARD: seeeduino_xiao_ble              # ←使うボード
-      SHIELD_LEFT:  roba_test_left           # ←zmk.yml の id と一致
-      SHIELD_RIGHT: roba_test_right          # ←zmk.yml の id と一致
-      ZMK_CONFIG: ${{ github.workspace }}/config
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # どの west.yml を使うか自動判定 → west 初期化
-      - name: Prepare west workspace
-        shell: bash
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install west
         run: |
-          set -eux
-          if [ -f west.yml ]; then
-            WEST_PATH="."
-          elif [ -f config/west.yml ]; then
-            WEST_PATH="config"
-          else
+          python -m pip install --upgrade pip
+          pip install west
+          west --version
+
+      # ---- ZMK 本体を必ず用意 ----
+      - name: Ensure ZMK source
+        run: |
+          set -e
+          if [ ! -d "zmk/app" ]; then
+            echo "📦 Cloning ZMK firmware..."
             git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
-            WEST_PATH="zmk"
+          else
+            echo "✅ ZMK source already present."
           fi
-          echo "WEST_PATH=$WEST_PATH"
-          west init -l "$WEST_PATH"
-          west update
-          west zephyr-export
-          # Zephyr の追加 Python 依存（あれば）を入れる。無ければスキップ。
-          pip3 install -r zephyr/scripts/requirements.txt || true
-          pip3 install -r zephyr/scripts/requirements/requirements.txt || true
 
-      # シールドが見えるか事前確認（ログに中身を出す）
-      - name: Preflight: list shields found
-        shell: bash
+      # ---- west 初期化（ローカル ZMK を優先）----
+      - name: Initialize ZMK workspace
         run: |
-          set -eux
-          echo "==== repo shields (config/boards/shields) ===="
-          find config/boards/shields -maxdepth 2 -name zmk.yml -print -exec cat {} \; || true
+          set -e
+          west init -l .
+          west update || true
+          west zephyr-export || true
 
-      # 左手ビルド
+          # ZMK/Zephyr の requirements は版でパスが違うので両対応
+          if   [ -f zephyr/scripts/requirements.txt ]; then
+            pip install -r zephyr/scripts/requirements.txt
+          elif [ -f zephyr/scripts/requirements/requirements.txt ]; then
+            pip install -r zephyr/scripts/requirements/requirements.txt
+          else
+            echo "⚠️ No Zephyr requirements file found. Continue."
+          fi
+
+      # ---- シールドを ZMK 側の探索パスに強制配置 ----
+      - name: Make shields visible to ZMK
+        run: |
+          set -e
+          mkdir -p zmk/config/boards/shields
+          # 左右とも存在すればコピー（存在しない場合はスキップして警告）
+          for side in "${SHIELD_LEFT}" "${SHIELD_RIGHT}"; do
+            if [ -d "config/boards/shields/${side}" ]; then
+              echo "🔗 Installing shield ${side}"
+              rm -rf "zmk/config/boards/shields/${side}"
+              cp -a  "config/boards/shields/${side}" "zmk/config/boards/shields/${side}"
+            else
+              echo "⚠️ Shield folder not found: config/boards/shields/${side} (skip copy)"
+            fi
+          done
+
+      # ---- シールド定義の最低限チェック ----
+      - name: Validate shields
+        run: |
+          fail=0
+          for side in "${SHIELD_LEFT}" "${SHIELD_RIGHT}"; do
+            if [ ! -f "zmk/config/boards/shields/${side}/zmk.yml" ]; then
+              echo "❌ Missing zmk.yml for shield: ${side}"
+              echo "   expected at: zmk/config/boards/shields/${side}/zmk.yml"
+              fail=1
+            else
+              echo "✅ Found shield: ${side}"
+            fi
+          done
+          if [ $fail -ne 0 ]; then
+            echo "Shield validation failed. Please check names and files."
+            exit 1
+          fi
+
+      # ---- 左ファームウェア ----
       - name: Build Left Firmware
-        shell: bash
         run: |
-          set -eux
-          west build -p=always -b "$BOARD" -d build/left zmk/app \
-            -- -DSHIELD="$SHIELD_LEFT" -DZMK_CONFIG="$ZMK_CONFIG"
+          set -e
+          west build -p=always -b "${BOARD}" -d build/left "${APP_DIR}" \
+            -- -DSHIELD="${SHIELD_LEFT}" -DZMK_CONFIG="${ZMK_CFG_DIR}"
 
-      # 右手ビルド
+      # ---- 右ファームウェア ----
       - name: Build Right Firmware
-        shell: bash
         run: |
-          set -eux
-          west build -p=always -b "$BOARD" -d build/right zmk/app \
-            -- -DSHIELD="$SHIELD_RIGHT" -DZMK_CONFIG="$ZMK_CONFIG"
+          set -e
+          west build -p=always -b "${BOARD}" -d build/right "${APP_DIR}" \
+            -- -DSHIELD="${SHIELD_RIGHT}" -DZMK_CONFIG="${ZMK_CFG_DIR}"
 
-      # 生成物をアップロード
+      # ---- 成果物をアップロード ----
       - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: zmk-uf2
           path: |
-            build/left/zephyr/*.uf2
-            build/right/zephyr/*.uf2
+            build/left/zephyr/zmk.uf2
+            build/right/zephyr/zmk.uf2
