@@ -1,10 +1,16 @@
-name: Build ZMK Firmware
+name: Build ZMK Firmware (robust)
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
+
+env:
+  BOARD: seeeduino_xiao_ble
+  SHIELD_LEFT:  roba_test_left
+  SHIELD_RIGHT: roba_test_right
+  ZMK_CFG_DIR: ${{ github.workspace }}/config
+  APP_DIR: zmk/app
 
 jobs:
   build:
@@ -17,60 +23,95 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install west and dependencies
+      - name: Install west
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install west
           west --version
 
+      # ---- ZMK 本体を必ず用意 ----
+      - name: Ensure ZMK source
+        run: |
+          set -e
+          if [ ! -d "zmk/app" ]; then
+            echo "📦 Cloning ZMK firmware..."
+            git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
+          else
+            echo "✅ ZMK source already present."
+          fi
+
+      # ---- west 初期化（ローカル ZMK を優先）----
       - name: Initialize ZMK workspace
         run: |
+          set -e
           west init -l .
           west update || true
           west zephyr-export || true
-          if [ -f zephyr/scripts/requirements.txt ]; then
+
+          # ZMK/Zephyr の requirements は版でパスが違うので両対応
+          if   [ -f zephyr/scripts/requirements.txt ]; then
             pip install -r zephyr/scripts/requirements.txt
           elif [ -f zephyr/scripts/requirements/requirements.txt ]; then
             pip install -r zephyr/scripts/requirements/requirements.txt
           else
-            echo "⚠️ No requirements file found — continuing anyway."
+            echo "⚠️ No Zephyr requirements file found. Continue."
           fi
 
-      # --- ZMK ソースを保証 ---
-      - name: Ensure ZMK source
+      # ---- シールドを ZMK 側の探索パスに強制配置 ----
+      - name: Make shields visible to ZMK
         run: |
-          mkdir -p zmk
-          if [ ! -d "zmk/app" ]; then
-            echo "📦 Cloning ZMK firmware source..."
-            git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
+          set -e
+          mkdir -p zmk/config/boards/shields
+          # 左右とも存在すればコピー（存在しない場合はスキップして警告）
+          for side in "${SHIELD_LEFT}" "${SHIELD_RIGHT}"; do
+            if [ -d "config/boards/shields/${side}" ]; then
+              echo "🔗 Installing shield ${side}"
+              rm -rf "zmk/config/boards/shields/${side}"
+              cp -a  "config/boards/shields/${side}" "zmk/config/boards/shields/${side}"
+            else
+              echo "⚠️ Shield folder not found: config/boards/shields/${side} (skip copy)"
+            fi
+          done
+
+      # ---- シールド定義の最低限チェック ----
+      - name: Validate shields
+        run: |
+          fail=0
+          for side in "${SHIELD_LEFT}" "${SHIELD_RIGHT}"; do
+            if [ ! -f "zmk/config/boards/shields/${side}/zmk.yml" ]; then
+              echo "❌ Missing zmk.yml for shield: ${side}"
+              echo "   expected at: zmk/config/boards/shields/${side}/zmk.yml"
+              fail=1
+            else
+              echo "✅ Found shield: ${side}"
+            fi
+          done
+          if [ $fail -ne 0 ]; then
+            echo "Shield validation failed. Please check names and files."
+            exit 1
           fi
 
-      # --- Shield のパスをZMKが認識できるようリンク ---
-      - name: Fix shield path for ZMK
-        run: |
-          mkdir -p zmk/config/boards/shields/
-          cp -r config/boards/shields/roba_test_left zmk/config/boards/shields/ || true
-          cp -r config/boards/shields/roba_test_right zmk/config/boards/shields/ || true
-
-      # --- 左ファームウェア ---
+      # ---- 左ファームウェア ----
       - name: Build Left Firmware
         run: |
-          west build -p always -b seeeduino_xiao_ble -d build/left zmk/app \
-            -- -DSHIELD=roba_test_left -DZMK_CONFIG=${{ github.workspace }}/config
+          set -e
+          west build -p=always -b "${BOARD}" -d build/left "${APP_DIR}" \
+            -- -DSHIELD="${SHIELD_LEFT}" -DZMK_CONFIG="${ZMK_CFG_DIR}"
 
-      # --- 右ファームウェア ---
+      # ---- 右ファームウェア ----
       - name: Build Right Firmware
         run: |
-          west build -p always -b seeeduino_xiao_ble -d build/right zmk/app \
-            -- -DSHIELD=roba_test_right -DZMK_CONFIG=${{ github.workspace }}/config
+          set -e
+          west build -p=always -b "${BOARD}" -d build/right "${APP_DIR}" \
+            -- -DSHIELD="${SHIELD_RIGHT}" -DZMK_CONFIG="${ZMK_CFG_DIR}"
 
-      # --- 成果物（UF2）アップロード ---
-      - name: Upload UF2 Artifacts
+      # ---- 成果物をアップロード ----
+      - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ZMK Firmware
+          name: zmk-uf2
           path: |
             build/left/zephyr/zmk.uf2
             build/right/zephyr/zmk.uf2
