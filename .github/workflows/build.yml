@@ -28,14 +28,25 @@ jobs:
       - name: Initialize ZMK workspace
         run: |
           west init -l .
-          west update
-          west zephyr-export
+          west update || true
+          west zephyr-export || true
           if [ -f zephyr/scripts/requirements.txt ]; then
             pip install -r zephyr/scripts/requirements.txt
           elif [ -f zephyr/scripts/requirements/requirements.txt ]; then
             pip install -r zephyr/scripts/requirements/requirements.txt
           else
             echo "⚠️ No requirements file found — continuing anyway."
+          fi
+
+      # 🧩 ZMK ソースを確実にクローン（appフォルダを保証）
+      - name: Fix ZMK workspace path
+        run: |
+          mkdir -p zmk
+          if [ ! -d "zmk/app" ]; then
+            echo "📦 Cloning ZMK main source..."
+            git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
+          else
+            echo "✅ ZMK source already exists"
           fi
 
       - name: Build Left Firmware
