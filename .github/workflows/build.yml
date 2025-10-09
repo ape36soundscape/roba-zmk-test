@@ -1,94 +1,83 @@
-name: Build ZMK Firmware (robust)
+name: Build ZMK Firmware (safe)
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
-env:
-  # ★必要ならここだけあなたの値に揃えてください
-  BOARD: seeeduino_xiao_ble
-  SHIELD_LEFT:  roba_test_left
-  SHIELD_RIGHT: roba_test_right
+# GHCR のコンテナを引っ張る権限（denied を防止）
+permissions:
+  contents: read
+  packages: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
+    # ZMK 公式ビルド環境（Zephyr/SDK 同梱）
+    container:
+      image: ghcr.io/zmkfirmware/zmk-build:stable
+
+    env:
+      BOARD: seeeduino_xiao_ble              # ←使うボード
+      SHIELD_LEFT:  roba_test_left           # ←zmk.yml の id と一致
+      SHIELD_RIGHT: roba_test_right          # ←zmk.yml の id と一致
+      ZMK_CONFIG: ${{ github.workspace }}/config
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python and west
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - run: |
-          python -m pip install --upgrade pip
-          pip install west pyyaml
-
-      # ZMK 本体を取得
-      - name: Fetch ZMK
+      # どの west.yml を使うか自動判定 → west 初期化
+      - name: Prepare west workspace
+        shell: bash
         run: |
           set -eux
-          test -d zmk || git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
-
-      # ZMK の manifest で west を初期化
-      - name: Initialize west from ZMK
-        run: |
-          set -eux
-          west init -l zmk
-          west update
-          west zephyr-export || true
-          if   [ -f zephyr/scripts/requirements.txt ]; then
-            pip install -r zephyr/scripts/requirements.txt
-          elif [ -f zephyr/scripts/requirements/requirements.txt ]; then
-            pip install -r zephyr/scripts/requirements/requirements.txt
+          if [ -f west.yml ]; then
+            WEST_PATH="."
+          elif [ -f config/west.yml ]; then
+            WEST_PATH="config"
           else
-            echo "⚠️ Zephyr requirements.txt が見つからないため続行します"
+            git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
+            WEST_PATH="zmk"
           fi
+          echo "WEST_PATH=$WEST_PATH"
+          west init -l "$WEST_PATH"
+          west update
+          west zephyr-export
+          # Zephyr の追加 Python 依存（あれば）を入れる。無ければスキップ。
+          pip3 install -r zephyr/scripts/requirements.txt || true
+          pip3 install -r zephyr/scripts/requirements/requirements.txt || true
 
-      # プリフライト（何が見えているかをログ出力）
-      - name: Preflight: show detected shields
+      # シールドが見えるか事前確認（ログに中身を出す）
+      - name: Preflight: list shields found
+        shell: bash
         run: |
           set -eux
-          echo "ZMK_CONFIG=$GITHUB_WORKSPACE/config"
-          echo "SHIELD_LEFT=$SHIELD_LEFT  SHIELD_RIGHT=$SHIELD_RIGHT"
-          echo "---- repo shields (config/boards/shields) ----"
+          echo "==== repo shields (config/boards/shields) ===="
           find config/boards/shields -maxdepth 2 -name zmk.yml -print -exec cat {} \; || true
 
-      # 念のため zmk/config にも同名で複製（ZMK の探索パスに確実に載せる）
-      - name: Copy shields into zmk/config (fallback)
-        run: |
-          set -eux
-          mkdir -p zmk/config/boards/shields
-          for s in "$SHIELD_LEFT" "$SHIELD_RIGHT"; do
-            if [ -d "config/boards/shields/$s" ]; then
-              rm -rf "zmk/config/boards/shields/$s"
-              cp -a "config/boards/shields/$s" "zmk/config/boards/shields/$s"
-            fi
-          done
-          echo "---- zmk/config shields ----"
-          find zmk/config/boards/shields -maxdepth 2 -name zmk.yml -print -exec cat {} \; || true
-
-      # 左右ビルド
+      # 左手ビルド
       - name: Build Left Firmware
+        shell: bash
         run: |
           set -eux
           west build -p=always -b "$BOARD" -d build/left zmk/app \
-            -- -DSHIELD="$SHIELD_LEFT" -DZMK_CONFIG="$GITHUB_WORKSPACE/config"
+            -- -DSHIELD="$SHIELD_LEFT" -DZMK_CONFIG="$ZMK_CONFIG"
 
+      # 右手ビルド
       - name: Build Right Firmware
+        shell: bash
         run: |
           set -eux
           west build -p=always -b "$BOARD" -d build/right zmk/app \
-            -- -DSHIELD="$SHIELD_RIGHT" -DZMK_CONFIG="$GITHUB_WORKSPACE/config"
+            -- -DSHIELD="$SHIELD_RIGHT" -DZMK_CONFIG="$ZMK_CONFIG"
 
-      # 成果物
+      # 生成物をアップロード
       - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: zmk-uf2
           path: |
-            build/left/zephyr/zmk.uf2
-            build/right/zephyr/zmk.uf2
+            build/left/zephyr/*.uf2
+            build/right/zephyr/*.uf2
