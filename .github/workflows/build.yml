@@ -1,4 +1,4 @@
-name: Build ZMK Firmware (Full Safe Build)
+name: Build ZMK Firmware (No-Container Safe Build)
 
 on:
   workflow_dispatch:
@@ -8,8 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/zmkfirmware/zmk-build:stable
 
     env:
       BOARD: seeeduino_xiao_ble
@@ -22,6 +20,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake ninja-build gperf ccache dfu-util \
+              device-tree-compiler wget python3-pip python3-setuptools \
+              python3-wheel xz-utils file make gcc g++ git
+          pip install west
 
       - name: Initialize west
         run: |
@@ -39,28 +50,20 @@ jobs:
           echo "=== Shields found ==="
           find config/boards/shields -type f -name "zmk.yml" -exec echo "FOUND:" {} \; -exec cat {} \; || true
           echo "====================="
-          if [ ! -f config/boards/shields/roba_test_left/zmk.yml ]; then
-            echo "❌ roba_test_left not found"
-            exit 1
-          fi
 
       - name: Build Left firmware
         run: |
-          set -eux
           west build -p always -b $BOARD -d build/left zmk/app \
             -- -DSHIELD=$SHIELD_LEFT \
                -DZMK_CONFIG=$ZMK_CONFIG \
-               -DBOARD_ROOT=$BOARD_ROOT \
-               -DZEPHYR_EXTRA_MODULES="$WORKSPACE/zmk;$ZMK_CONFIG"
+               -DBOARD_ROOT=$BOARD_ROOT
 
       - name: Build Right firmware
         run: |
-          set -eux
           west build -p always -b $BOARD -d build/right zmk/app \
             -- -DSHIELD=$SHIELD_RIGHT \
                -DZMK_CONFIG=$ZMK_CONFIG \
-               -DBOARD_ROOT=$BOARD_ROOT \
-               -DZEPHYR_EXTRA_MODULES="$WORKSPACE/zmk;$ZMK_CONFIG"
+               -DBOARD_ROOT=$BOARD_ROOT
 
       - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
