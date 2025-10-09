@@ -1,0 +1,3 @@
+# roBa test shields
+rsource "roba_test_left/Kconfig"
+rsource "roba_test_right/Kconfig"
