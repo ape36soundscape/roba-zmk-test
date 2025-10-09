@@ -1,13 +1,9 @@
-name: Build ZMK Firmware (final recovery)
+name: Build ZMK Firmware (Full Safe Build)
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
-
-permissions:
-  contents: read
-  packages: read
 
 jobs:
   build:
@@ -19,6 +15,7 @@ jobs:
       BOARD: seeeduino_xiao_ble
       SHIELD_LEFT: roba_test_left
       SHIELD_RIGHT: roba_test_right
+      WORKSPACE: ${{ github.workspace }}
       ZMK_CONFIG: ${{ github.workspace }}/config
       BOARD_ROOT: ${{ github.workspace }}/config
 
@@ -27,55 +24,48 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize west
-        shell: bash
         run: |
           set -eux
-          cd ${{ github.workspace }}
-          if [ -f west.yml ]; then
-            WEST_PATH="."
-          elif [ -f config/west.yml ]; then
-            WEST_PATH="config"
-          else
+          cd $WORKSPACE
+          if [ ! -d zmk ]; then
             git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
-            WEST_PATH="zmk"
           fi
-          west init -l "$WEST_PATH"
+          west init -l zmk
           west update
           west zephyr-export
 
-      - name: Preflight check
-        shell: bash
+      - name: Verify shields path
+        run: |
+          echo "=== Shields found ==="
+          find config/boards/shields -type f -name "zmk.yml" -exec echo "FOUND:" {} \; -exec cat {} \; || true
+          echo "====================="
+          if [ ! -f config/boards/shields/roba_test_left/zmk.yml ]; then
+            echo "❌ roba_test_left not found"
+            exit 1
+          fi
+
+      - name: Build Left firmware
         run: |
           set -eux
-          echo "== west list =="
-          west list
-          echo "== shields visible =="
-          find config/boards/shields -maxdepth 2 -name zmk.yml -print -exec cat {} \; || true
+          west build -p always -b $BOARD -d build/left zmk/app \
+            -- -DSHIELD=$SHIELD_LEFT \
+               -DZMK_CONFIG=$ZMK_CONFIG \
+               -DBOARD_ROOT=$BOARD_ROOT \
+               -DZEPHYR_EXTRA_MODULES="$WORKSPACE/zmk;$ZMK_CONFIG"
 
-      - name: Build Left
-        shell: bash
+      - name: Build Right firmware
         run: |
           set -eux
-          west build -p=always -b "$BOARD" -d build/left zmk/app \
-            -- -DSHIELD="$SHIELD_LEFT" \
-               -DZMK_CONFIG="$ZMK_CONFIG" \
-               -DBOARD_ROOT="$BOARD_ROOT" \
-               -DZEPHYR_EXTRA_MODULES="$PWD/zmk;$ZMK_CONFIG"
+          west build -p always -b $BOARD -d build/right zmk/app \
+            -- -DSHIELD=$SHIELD_RIGHT \
+               -DZMK_CONFIG=$ZMK_CONFIG \
+               -DBOARD_ROOT=$BOARD_ROOT \
+               -DZEPHYR_EXTRA_MODULES="$WORKSPACE/zmk;$ZMK_CONFIG"
 
-      - name: Build Right
-        shell: bash
-        run: |
-          set -eux
-          west build -p=always -b "$BOARD" -d build/right zmk/app \
-            -- -DSHIELD="$SHIELD_RIGHT" \
-               -DZMK_CONFIG="$ZMK_CONFIG" \
-               -DBOARD_ROOT="$BOARD_ROOT" \
-               -DZEPHYR_EXTRA_MODULES="$PWD/zmk;$ZMK_CONFIG"
-
-      - name: Upload UF2
+      - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zmk-uf2
+          name: zmk-firmware-uf2
           path: |
             build/left/zephyr/*.uf2
             build/right/zephyr/*.uf2
