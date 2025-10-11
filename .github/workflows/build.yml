@@ -1,4 +1,4 @@
-name: Build ZMK Firmware (No-Container Safe Build)
+name: Build ZMK Firmware (Auto Shields)
 
 on:
   workflow_dispatch:
@@ -10,9 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BOARD: seeeduino_xiao_ble
-      SHIELD_LEFT: roba_test_left
-      SHIELD_RIGHT: roba_test_right
+      BOARD: seeeduino_xiao_ble                 # ← XIAO nRF52840（必要なら変更）
       ZMK_CONFIG: ${{ github.workspace }}/config
       BOARD_ROOT: ${{ github.workspace }}/config
 
@@ -28,13 +26,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake ninja-build gperf ccache dfu-util             device-tree-compiler wget python3-pip python3-setuptools             python3-wheel xz-utils file make gcc g++ git
-          pip install west
+          sudo apt install -y cmake ninja-build gperf ccache dfu-util \
+            device-tree-compiler wget python3-pip python3-setuptools \
+            python3-wheel xz-utils file make gcc g++ git
+          pip install west pyyaml
 
-      - name: Initialize west
+      - name: Initialize west (fetch ZMK)
         run: |
           set -eux
-          cd ${{ github.workspace }}
           if [ ! -d zmk ]; then
             git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
           fi
@@ -42,24 +41,66 @@ jobs:
           west update
           west zephyr-export
 
-      - name: Verify shields path
+      - name: Preflight - list shields and ids
         run: |
-          echo "=== Shields found in config/boards/shields ==="
-          find config/boards/shields -name "zmk.yml" -print -exec cat {} \; || echo "No zmk.yml found!"
-          echo "============================================="
+          set -eux
+          echo "== zmk.yml files =="
+          find config/boards/shields -maxdepth 2 -name zmk.yml -print || true
+          echo "== parsed ids =="
+          python - <<'PY'
+import glob, yaml, json, os
+ids = []
+for y in glob.glob("config/boards/shields/*/zmk.yml"):
+    try:
+        with open(y, encoding="utf-8") as f:
+            d = yaml.safe_load(f) or {}
+        sid = d.get("id")
+        if sid: 
+            print(f"FOUND id: {sid}  <- {y}")
+            ids.append(sid)
+        else:
+            print(f"SKIP: no id in {y}")
+    except Exception as e:
+        print(f"ERROR parsing {y}: {e}")
+if not ids:
+    print("NO SHIELDS FOUND. Please add config/boards/shields/<name>/zmk.yml with 'id: <name>'.")
+    raise SystemExit(2)
+open(os.environ["GITHUB_OUTPUT"], "a").write("SHIELDS="+",".join(ids))
+PY
 
-      - name: Build Left firmware
+      - name: Build all shields (sequential)
+        id: build_all
         run: |
-          west build -p always -b seeeduino_xiao_ble -d build/left zmk/app             -- -DSHIELD=roba_test_left                -DZMK_CONFIG=${{ github.workspace }}/config                -DBOARD_ROOT=${{ github.workspace }}/config
-
-      - name: Build Right firmware
-        run: |
-          west build -p always -b seeeduino_xiao_ble -d build/right zmk/app             -- -DSHIELD=roba_test_right                -DZMK_CONFIG=${{ github.workspace }}/config                -DBOARD_ROOT=${{ github.workspace }}/config
+          set -eux
+          # Collect shield ids again (same logic as preflight)
+          shields=$(python - <<'PY'
+import glob, yaml
+ids=[]
+for y in glob.glob("config/boards/shields/*/zmk.yml"):
+    try:
+        with open(y, encoding="utf-8") as f:
+            d = yaml.safe_load(f) or {}
+        sid = d.get("id")
+        if sid: ids.append(sid)
+    except Exception:
+        pass
+print(" ".join(ids))
+PY
+)
+          if [ -z "$shields" ]; then
+            echo "No shield ids collected. Abort."
+            exit 2
+          fi
+          for sid in $shields; do
+            echo "::group::Building $sid"
+            west build -p always -b "$BOARD" -d "build/$sid" zmk/app \
+              -- -DSHIELD="$sid" -DZMK_CONFIG="$ZMK_CONFIG" -DBOARD_ROOT="$BOARD_ROOT"
+            echo "::endgroup::"
+          done
 
       - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zmk-firmware-uf2
+          name: zmk-uf2-all
           path: |
-            build/left/zephyr/*.uf2
-            build/right/zephyr/*.uf2
+            build/*/zephyr/*.uf2
