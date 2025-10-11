@@ -13,7 +13,6 @@ jobs:
       BOARD: seeeduino_xiao_ble
       SHIELD_LEFT: roba_test_left
       SHIELD_RIGHT: roba_test_right
-      WORKSPACE: ${{ github.workspace }}
       ZMK_CONFIG: ${{ github.workspace }}/config
       BOARD_ROOT: ${{ github.workspace }}/config
 
@@ -29,15 +28,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake ninja-build gperf ccache dfu-util \
-              device-tree-compiler wget python3-pip python3-setuptools \
-              python3-wheel xz-utils file make gcc g++ git
+          sudo apt install -y cmake ninja-build gperf ccache dfu-util             device-tree-compiler wget python3-pip python3-setuptools             python3-wheel xz-utils file make gcc g++ git
           pip install west
 
       - name: Initialize west
         run: |
           set -eux
-          cd $WORKSPACE
+          cd ${{ github.workspace }}
           if [ ! -d zmk ]; then
             git clone --depth=1 https://github.com/zmkfirmware/zmk.git zmk
           fi
@@ -47,23 +44,17 @@ jobs:
 
       - name: Verify shields path
         run: |
-          echo "=== Shields found ==="
-          find config/boards/shields -type f -name "zmk.yml" -exec echo "FOUND:" {} \; -exec cat {} \; || true
-          echo "====================="
+          echo "=== Shields found in config/boards/shields ==="
+          find config/boards/shields -name "zmk.yml" -print -exec cat {} \; || echo "No zmk.yml found!"
+          echo "============================================="
 
       - name: Build Left firmware
         run: |
-          west build -p always -b $BOARD -d build/left zmk/app \
-            -- -DSHIELD=$SHIELD_LEFT \
-               -DZMK_CONFIG=$ZMK_CONFIG \
-               -DBOARD_ROOT=$BOARD_ROOT
+          west build -p always -b seeeduino_xiao_ble -d build/left zmk/app             -- -DSHIELD=roba_test_left                -DZMK_CONFIG=${{ github.workspace }}/config                -DBOARD_ROOT=${{ github.workspace }}/config
 
       - name: Build Right firmware
         run: |
-          west build -p always -b $BOARD -d build/right zmk/app \
-            -- -DSHIELD=$SHIELD_RIGHT \
-               -DZMK_CONFIG=$ZMK_CONFIG \
-               -DBOARD_ROOT=$BOARD_ROOT
+          west build -p always -b seeeduino_xiao_ble -d build/right zmk/app             -- -DSHIELD=roba_test_right                -DZMK_CONFIG=${{ github.workspace }}/config                -DBOARD_ROOT=${{ github.workspace }}/config
 
       - name: Upload UF2 artifacts
         uses: actions/upload-artifact@v4
