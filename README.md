@@ -1,15 +1,19 @@
-# roBa Minimal Shields Fixpack
+# Auto-build workflow for ZMK (all shields)
 
-This pack gives you *build-safe* shields for:
-- `roba_test_left`
-- `roba_test_right`
+This workflow **auto-discovers every shield** under `config/boards/shields/*/zmk.yml`,
+reads its `id`, and builds firmware for all of them on **Ubuntu (no Docker)**.
 
-It compiles on **Seeeduino XIAO BLE (nRF52840)** with ZMK.  
-Pins are dummy (1x1 matrix) to guarantee CI success. Replace them later with your real wiring.
+## How to install
+1. Drop `.github/workflows/build.yml` into your repo (overwrite if asked).
+2. Commit & push to `main` (or run manually in GitHub → Actions).
 
-## How to use
-1. Merge `config/` and `.github/` into your repo root (overwrite if asked).
-2. Commit & push.
-3. In GitHub, open **Actions** → run “Build ZMK Firmware (No-Container Safe Build)”.
+## Requirements
+- Each shield must have: `config/boards/shields/<name>/zmk.yml` with `id: <name>`
+- Optional but recommended: `<name>.overlay`, `<name>.keymap`
 
-If it passes, replace the overlay pins and expand the keymap to your real layout.
+## Change board
+If you are not using **Seeeduino XIAO BLE**, edit the `BOARD` env at the top:
+```
+env:
+  BOARD: <your_board_here>
+```
