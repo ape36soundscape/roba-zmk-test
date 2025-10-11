@@ -1,38 +1,15 @@
-# roBa ZMK Test Firmware
+# roBa Minimal Shields Fixpack
 
-This repository builds ZMK firmware for the **roBa** keyboard,
-based on **kumakey’s original design**, and now adapted for the latest
-ZMK mouse input support.
+This pack gives you *build-safe* shields for:
+- `roba_test_left`
+- `roba_test_right`
 
----
+It compiles on **Seeeduino XIAO BLE (nRF52840)** with ZMK.  
+Pins are dummy (1x1 matrix) to guarantee CI success. Replace them later with your real wiring.
 
-## Features
+## How to use
+1. Merge `config/` and `.github/` into your repo root (overwrite if asked).
+2. Commit & push.
+3. In GitHub, open **Actions** → run “Build ZMK Firmware (No-Container Safe Build)”.
 
-- ✅ ZMK 3.x compatible  
-- ✅ Seeeduino XIAO BLE support  
-- ✅ PMW3610 optical sensor via [badjeff/zmk-pmw3610-driver](https://github.com/badjeff/zmk-pmw3610-driver)  
-- ✅ Input handled by ZMK’s new input-processors layer  
-- ✅ Dual-side (Left / Right) build with UF2 outputs  
-
----
-
-## Credits
-
-This work builds on the efforts of:
-
-- **kumakey** — roBa / mona hardware design  
-- **badjeff** — PMW3610 driver integration  
-- **ZMK team** — official firmware base and mouse input support  
-
-Thank you to everyone who contributed to the open-source keyboard ecosystem.
-
----
-
-### Build Instructions
-
-1. Fork this repository:  
-   https://github.com/ape36soundscape/roba-zmk-test
-
-2. Go to **Actions → Build ZMK Firmware → Run workflow**
-
-3. After build, download:
+If it passes, replace the overlay pins and expand the keymap to your real layout.
